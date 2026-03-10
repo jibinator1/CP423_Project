@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MP3 Uploader</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        #uploadForm { margin-bottom: 20px; }
+        #results { margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px; }
+        .result-section { margin-bottom: 15px; }
+        h2 { color: #333; }
+        pre { background-color: #f4f4f4; padding: 10px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; }
+        .loading, .error { margin-top: 10px; padding: 10px; border-radius: 5px; }
+        .loading { background-color: #e0e0e0; }
+        .error { background-color: #ffdddd; color: #d8000c; }
+        button:disabled { cursor: not-allowed; opacity: 0.6; }
+    </style>
+</head>
+<body>
+    <h1>Upload MP3 File</h1>
+    <form id="uploadForm">
+        <input type="file" id="mp3File" accept=".mp3" required>
+        <button type="submit">Upload and Process</button>
+    </form>
+
+    <div id="results" style="display: none;">
+        <div class="result-section">
+            <h2>Summary</h2>
+            <pre id="summaryOutput">Processing...</pre>
+        </div>
+        <div class="result-section">
+            <h2>Top Result</h2>
+            <pre id="topResultOutput">Processing...</pre>
+        </div>
+    </div>
+    <div id="loading" style="display: none;" class="loading">Processing your file... Please wait.</div>
+    <div id="error" style="display: none;" class="error"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>

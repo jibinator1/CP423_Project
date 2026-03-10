@@ -9,3 +9,4 @@ dotenv
 supabase
 fastapi
 uvicorn
+python-multipart

@@ -1,0 +1,75 @@
+.app-container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  min-height: 100vh;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+  animation: fadeIn 0.8s ease-out forwards;
+}
+
+.header h1 {
+  font-size: 3rem;
+  margin-bottom: 0.5rem;
+}
+
+.header p {
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.main-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  flex: 1;
+}
+
+.mode-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.mode-btn {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  border-radius: 30px;
+  padding: 0.6rem 2rem;
+  font-size: 1rem;
+  transition: var(--transition);
+  min-width: 140px;
+}
+
+.mode-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+}
+
+.mode-btn.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 20px rgba(124, 58, 237, 0.4);
+}
+
+.active-panel-container {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.results-section {
+  margin-top: 2rem;
+  animation: fadeIn 0.6s ease-out forwards;
+}

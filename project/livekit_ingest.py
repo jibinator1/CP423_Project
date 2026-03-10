@@ -3,7 +3,7 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, File, UploadFile
 from pydantic import BaseModel, Field
 
 try:
@@ -108,3 +108,61 @@ def ingest_audio(payload: AudioPayload, x_api_key: str | None = Header(default=N
         "speaker_role": role,
         "segments_indexed": indexed_count,
     }
+
+
+import shutil
+import tempfile
+
+@app.post("/api/upload_mp3")
+async def upload_mp3(audio_file: UploadFile = File(...)):
+    runtime_bot = _get_bot()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+        shutil.copyfileobj(audio_file.file, tmp_file)
+        tmp_path = tmp_file.name
+
+    try:
+        roles = {"SPEAKER_00": "CLINICIAN", "SPEAKER_01": "PATIENT"}
+        runtime_bot.process_audio_file(tmp_path, roles)
+        
+        full_transcript = runtime_bot.get_full_transcript()
+        summary = "No content to summarize."
+        if full_transcript.strip():
+            summary = runtime_bot.generate_clinical_summary(full_transcript)
+            
+        return {"summary": summary, "top_result": "Indexed processed successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+@app.post("/api/process_live_audio")
+async def process_live_audio(audio_chunk: UploadFile = File(...)):
+    runtime_bot = _get_bot()
+    
+    try:
+        audio_bytes = await audio_chunk.read()
+        transcribed_segments = runtime_bot.transcribe_audio_bytes(audio_bytes, filename=audio_chunk.filename)
+        
+        role = "CLINICIAN" 
+        indexed_count = 0
+        full_text = ""
+        for seg in transcribed_segments:
+            runtime_bot.index_segment(content=seg["text"], speaker_role=role, metadata={"source": "live_recording"})
+            indexed_count += 1
+            full_text += seg["text"] + " "
+            
+        summary = f"Recorded and indexed {indexed_count} segment(s)."
+        top_result = None
+        if full_text.strip():
+            # Generate the true clinical summary using the LLM method
+            summary = runtime_bot.generate_clinical_summary(full_text)
+            
+            results = runtime_bot.search_segments(query_text=full_text, top_k=1)
+            if results:
+                top_result = results[0]
+                
+        return {"summary": summary, "top_result": top_result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

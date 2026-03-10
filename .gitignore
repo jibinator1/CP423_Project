@@ -1,14 +1,22 @@
-# Ignore everything by default
-*
+# Secrets
+.env
+.env.*
+!.env.example
 
-# Keep gitignore itself and env template
-!.gitignore
-!.env_example
-!requirements.txt
-
-# Keep only backend project code directory
-!project/
-!project/**
-
-project/__pycache__/
+# Python
+__pycache__/
 *.pyc
+*.pyo
+venv/
+env/
+.pytest_cache/
+
+# Node/React
+node_modules/
+dist/
+build/
+.npm/
+
+# OS
+.DS_Store
+Thumbs.db
