@@ -94,7 +94,7 @@ class ClinicalIRSystem:
 
         groq_api_key = _required_env("GROQ_API_KEY")
         supabase_url = _required_env("SUPABASE_URL")
-        supabase_key = _required_env("SUPABASE_SERVICE_ROLE_KEY")
+        supabase_key = _required_env("SUPABASE_KEY")
         hf_auth_token = os.getenv("HF_AUTH_TOKEN")
 
         self.groq_client = Groq(api_key=groq_api_key)
