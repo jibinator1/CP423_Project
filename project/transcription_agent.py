@@ -17,9 +17,8 @@ logger = logging.getLogger("transcription-agent")
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(root_dir, ".env"))
 
-# n8n Webhook URL (from n8n_workflow.json)
-# If using production mode, use the production URL!
-N8N_WEBHOOK_URL = "http://localhost:5678/webhook/livekit-segment-ingest"
+# n8n Webhook URL (from environment or local default)
+N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/livekit-segment-ingest")
 INGEST_TOKEN = os.getenv("LIVEKIT_INGEST_TOKEN", "my_secret_ingest_token")
 
 async def run_agent():

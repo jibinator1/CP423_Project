@@ -59,13 +59,12 @@ class BM25Retriever:
             scores[i] = score
         return scores
 
-import soundfile as sf
-import torch
 from dotenv import load_dotenv
 from groq import Groq
-from pyannote.audio import Pipeline
-from sentence_transformers import SentenceTransformer
 from supabase import create_client
+
+# Heavy ML imports (torch, pyannote, sentence_transformers) are deferred
+# to ClinicalIRSystem.__init__ to let uvicorn bind the port first.
 
 
 def _required_env(name: str) -> str:
@@ -78,7 +77,20 @@ def _required_env(name: str) -> str:
 class ClinicalIRSystem:
     def __init__(self) -> None:
         print("--- Initializing Clinical IR System (Python) ---")
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Defer heavy imports so uvicorn can bind the port first on cloud
+        import torch as _torch
+        import soundfile as _sf
+        from sentence_transformers import SentenceTransformer
+        from pyannote.audio import Pipeline as _Pipeline
+        
+        # Make these accessible as module-level aliases for the rest of the class
+        globals()['sf'] = _sf
+        globals()['torch'] = _torch
+        globals()['Pipeline'] = _Pipeline
+        globals()['SentenceTransformer'] = SentenceTransformer
+        
+        self.device = _torch.device("cuda" if _torch.cuda.is_available() else "cpu")
 
         groq_api_key = _required_env("GROQ_API_KEY")
         supabase_url = _required_env("SUPABASE_URL")
@@ -87,9 +99,11 @@ class ClinicalIRSystem:
 
         self.groq_client = Groq(api_key=groq_api_key)
         self.supabase = create_client(supabase_url, supabase_key)
+        print("--- Loading SentenceTransformer model... ---")
         self.embed_model = SentenceTransformer("all-MiniLM-L6-v2", device=self.device)
         self.hf_auth_token = hf_auth_token
         self.diarization_pipeline = None
+        print("--- Clinical IR System initialized. ---")
 
     def _ensure_diarization_pipeline(self) -> None:
         if self.diarization_pipeline is None:
