@@ -3,7 +3,9 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, File, UploadFile
+from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
 from livekit import api
 from pydantic import BaseModel, Field
 
@@ -57,8 +59,16 @@ def _get_bot() -> ClinicalIRSystem:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health(background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Health check endpoint that also triggers model warmup in the background."""
+    # Start warming up the models immediately in the background
+    try:
+        current_bot = _get_bot()
+        background_tasks.add_task(current_bot.warmup)
+    except Exception as e:
+        print(f"Health check failed to start warmup: {e}")
+        
+    return {"status": "ok", "warmup": "started"}
 
 
 @app.post("/livekit/segment")

@@ -4,6 +4,7 @@ services:
     env: python
     packages:
       - ffmpeg
+      - libsndfile1
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python -m uvicorn project.livekit_ingest:app --host 0.0.0.0 --port 10000 --timeout-keep-alive 120"
     plan: free
@@ -28,6 +29,7 @@ services:
     env: python
     packages:
       - ffmpeg
+      - libsndfile1
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python project/transcription_agent.py"
     plan: free

@@ -105,6 +105,15 @@ class ClinicalIRSystem:
         self.diarization_pipeline = None
         print("--- Clinical IR System initialized. ---")
 
+    def warmup(self) -> None:
+        """Warams up the models in the background to avoid timeouts on first request."""
+        print("--- Warming up models... ---")
+        try:
+            self._ensure_diarization_pipeline()
+            print("--- Warmup complete: All models loaded. ---")
+        except Exception as e:
+            print(f"--- Warmup failed: {e} ---")
+
     def _ensure_diarization_pipeline(self) -> None:
         if self.diarization_pipeline is None:
             self.diarization_pipeline = Pipeline.from_pretrained(
