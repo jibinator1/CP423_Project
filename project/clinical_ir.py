@@ -2,8 +2,62 @@ import argparse
 import json
 import math
 import os
+import re
 import tempfile
+from collections import Counter
 from typing import Any
+
+class BM25Retriever:
+    def __init__(self, k1=1.5, b=0.75):
+        self.k1 = k1
+        self.b = b
+        self.corpus: list[dict[str, Any]] = []
+        self.doc_len: list[int] = []
+        self.avgdl: float = 0.0
+        self.df: dict[str, int] = {}
+        self.idf: dict[str, float] = {}
+        self.N: int = 0
+
+    def tokenize(self, text: str) -> list[str]:
+        return re.findall(r'\w+', text.lower())
+
+    def fit(self, corpus: list[dict]):
+        self.corpus = corpus
+        self.N = len(corpus)
+        if self.N == 0: return
+        
+        TotalLen = 0
+        for doc in corpus:
+            tokens = self.tokenize(doc.get("content", ""))
+            self.doc_len.append(len(tokens))
+            TotalLen += len(tokens)
+            
+            frequencies = Counter(tokens)
+            for word in frequencies.keys():
+                self.df[word] = self.df.get(word, 0) + 1
+                
+        self.avgdl = TotalLen / self.N
+        
+        for word, freq in self.df.items():
+            self.idf[word] = math.log((self.N - freq + 0.5) / (freq + 0.5) + 1.0)
+
+    def get_scores(self, query: str) -> list[float]:
+        scores = [0.0] * self.N
+        if self.N == 0: return scores
+            
+        q_tokens = self.tokenize(query)
+        for i, doc in enumerate(self.corpus):
+            doc_tokens = self.tokenize(doc.get("content", ""))
+            doc_freqs = Counter(doc_tokens)
+            score = 0.0
+            for token in q_tokens:
+                if token not in doc_freqs: continue
+                tf = doc_freqs[token]
+                num = tf * (self.k1 + 1)
+                den = tf + self.k1 * (1 - self.b + self.b * (self.doc_len[i] / self.avgdl))
+                score += self.idf.get(token, 0) * (num / den)
+            scores[i] = score
+        return scores
 
 import soundfile as sf
 import torch
@@ -57,6 +111,8 @@ class ClinicalIRSystem:
         audio_payload = {"waveform": waveform, "sample_rate": samplerate}
 
         print("Step 2: Identifying speakers (Diarization)...")
+        if self.diarization_pipeline is None:
+            raise RuntimeError("Diarization pipeline not initialized")
         diar_output = self.diarization_pipeline(audio_payload)
         diar_segments = []
         for turn, speaker in diar_output.exclusive_speaker_diarization:
@@ -104,7 +160,7 @@ class ClinicalIRSystem:
         records = response.data or []
         return records[0] if records else payload
 
-    def transcribe_audio_bytes(self, audio_bytes: bytes, filename: str = "chunk.wav") -> list[dict]:
+    def transcribe_audio_bytes(self, audio_bytes: bytes, filename: str = "chunk.wav") -> list[dict[str, Any]]:
         if not audio_bytes:
             raise ValueError("Audio bytes are empty.")
 
@@ -135,6 +191,7 @@ class ClinicalIRSystem:
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
+        return [] # Fallback return if something unexpected happens
 
     def _fetch_segments(self, role_filter: str = "ALL") -> list[dict]:
         query = self.supabase.table("clinical_segments").select(
@@ -158,31 +215,47 @@ class ClinicalIRSystem:
 
     def search_segments(
         self, query_text: str, top_k: int = 5, role_filter: str = "ALL"
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         segments = self._fetch_segments(role_filter=role_filter)
         if not segments:
             return []
 
         q_embedding = self.embed_model.encode(query_text).tolist()
-        scored = []
-        for seg in segments:
-            score = self._cosine_similarity(q_embedding, seg.get("embedding", []))
+        
+        bm25 = BM25Retriever()
+        bm25.fit(segments)
+        bm25_scores = bm25.get_scores(query_text)
+
+        scored: list[dict[str, Any]] = []
+        for i, seg in enumerate(segments):
+            semantic_score = self._cosine_similarity(q_embedding, seg.get("embedding", []))
+            b_score = bm25_scores[i]
+            
+            # Hybrid rank: Combine Semantic (approx -1 to 1) and BM25 linearly.
+            hybrid_score = semantic_score + (b_score * 0.1)
+            
             scored.append(
                 {
                     "id": seg.get("id"),
                     "speaker_role": seg.get("speaker_role"),
                     "content": seg.get("content"),
                     "metadata": seg.get("metadata", {}),
-                    "score": score,
+                    "semantic_score": semantic_score,
+                    "bm25_score": b_score,
+                    "score": hybrid_score,
                 }
             )
 
         scored.sort(key=lambda x: x["score"], reverse=True)
-        return scored[:top_k]
+        # Using a loop instead of a slice to satisfy specific type-checker configurations
+        top_results: list[dict[str, Any]] = []
+        for i in range(min(top_k, len(scored))):
+            top_results.append(scored[i])
+        return top_results
 
     def answer_question(
         self, question: str, top_k: int = 5, role_filter: str = "ALL"
-    ) -> tuple[str, list[dict]]:
+    ) -> tuple[str, list[dict[str, Any]]]:
         retrieved = self.search_segments(
             query_text=question, top_k=top_k, role_filter=role_filter
         )
@@ -191,13 +264,15 @@ class ClinicalIRSystem:
 
         context = "\n".join(
             [
-                f"- [{seg['speaker_role']}] (score={seg['score']:.3f}) {seg['content']}"
+                f"- [Speaker: {seg['speaker_role']}] [Time: {seg['metadata'].get('start', 'N/A')}-{seg['metadata'].get('end', 'N/A')}] (Score={seg['score']:.3f}) {seg['content']}"
                 for seg in retrieved
             ]
         )
         prompt = f"""
-Answer the question using ONLY the retrieved transcript segments.
-If the answer is not present, say "Not enough evidence in retrieved segments."
+Answer the question using ONLY the retrieved transcript segments below.
+If the answer is not present in the retrieved segments, you MUST say "Not enough evidence in retrieved segments."
+Do not use any outside knowledge.
+When you provide an answer, you MUST explain your reasoning by citing the specific speaker and timestamp from the segments.
 
 Question:
 {question}
@@ -233,6 +308,7 @@ Retrieved Segments:
         prompt = f"""
 Summarize the following clinical interview.
 Focus on patient concerns and clinician observations.
+Based on the transcript, also generate a proactive clinical follow-up plan (e.g., tests to order, lifestyle changes, medications) using your medical reasoning.
 
 TRANSCRIPT:
 {transcript}
@@ -240,7 +316,7 @@ TRANSCRIPT:
 SUMMARY FORMAT:
 1. Patient Reported Symptoms:
 2. Clinician Observations/Questions:
-3. Follow-up Plan:
+3. Recommended Follow-up Plan:
 """
         completion = self.groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -248,7 +324,7 @@ SUMMARY FORMAT:
         )
         return completion.choices[0].message.content
 
-    def evaluate_retrieval(self, qrels_path: str, top_k: int = 5) -> dict:
+    def evaluate_retrieval(self, qrels_path: str, top_k: int = 5) -> dict[str, Any]:
         with open(qrels_path, "r", encoding="utf-8") as f:
             qrels = json.load(f)
 

@@ -1,0 +1,155 @@
+{
+  "name": "LiveKit Segment -> Clinical IR Backend",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "livekit-segment-ingest",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Incoming Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "webhookId": "livekit-segment-ingest"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "content",
+              "value": "={{ $json.body.content || $json.content }}",
+              "type": "string"
+            },
+            {
+              "name": "speaker_role",
+              "value": "={{ ($json.body.speaker_role || $json.speaker_role || 'OTHER').toUpperCase() }}",
+              "type": "string"
+            },
+            {
+              "name": "session_id",
+              "value": "={{ $json.body.session_id || $json.session_id || '' }}",
+              "type": "string"
+            },
+            {
+              "name": "participant_id",
+              "value": "={{ $json.body.participant_id || $json.participant_id || '' }}",
+              "type": "string"
+            },
+            {
+              "name": "start",
+              "value": "={{ $json.body.start || $json.start || 0 }}",
+              "type": "number"
+            },
+            {
+              "name": "end",
+              "value": "={{ $json.body.end || $json.end || 0 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "normalize-node",
+      "name": "Normalize Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/livekit/segment",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "REPLACE_WITH_LIVEKIT_INGEST_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "forward-node",
+      "name": "Forward To Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        790,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'forwarded', backend: $json } }}",
+        "options": {}
+      },
+      "id": "response-node",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Incoming Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Payload": {
+      "main": [
+        [
+          {
+            "node": "Forward To Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forward To Backend": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}

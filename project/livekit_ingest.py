@@ -4,6 +4,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, File, UploadFile
+from livekit import api
 from pydantic import BaseModel, Field
 
 try:
@@ -125,11 +126,16 @@ async def upload_mp3(audio_file: UploadFile = File(...)):
         runtime_bot.process_audio_file(tmp_path, roles)
         
         full_transcript = runtime_bot.get_full_transcript()
-        summary = "No content to summarize."
+        top_result = None
         if full_transcript.strip():
             summary = runtime_bot.generate_clinical_summary(full_transcript)
             
-        return {"summary": summary, "top_result": "Indexed processed successfully."}
+            # Execute a search to find the most relevant segment across the whole conversation
+            results = runtime_bot.search_segments(query_text=full_transcript, top_k=1)
+            if results:
+                top_result = results[0]
+            
+        return {"summary": summary, "top_result": top_result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -165,4 +171,24 @@ async def process_live_audio(audio_chunk: UploadFile = File(...)):
         return {"summary": summary, "top_result": top_result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/livekit/token")
+def get_livekit_token(participant_name: str = "Clinician"):
+    livekit_api_key = os.getenv("LIVEKIT_API_KEY")
+    livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
+    livekit_url = os.getenv("LIVEKIT_URL")
+    
+    if not livekit_api_key or not livekit_api_secret or not livekit_url:
+        raise HTTPException(status_code=500, detail="LiveKit configuration missing from .env")
+        
+    token = api.AccessToken(
+        livekit_api_key, 
+        livekit_api_secret
+    ).with_identity(participant_name).with_name(participant_name).with_grants(
+        api.VideoGrants(room_join=True, room="clinical-room")
+    )
+    return {
+        "token": token.to_jwt(),
+        "url": livekit_url
+    }
 

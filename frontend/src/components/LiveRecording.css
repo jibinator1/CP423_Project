@@ -146,3 +146,50 @@
   height: 36px;
   border-width: 3px;
 }
+
+.transcription-container {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.transcript-bubble {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  align-self: flex-start;
+  max-width: 85%;
+  animation: slideIn 0.2s ease-out;
+}
+
+.transcript-bubble.partial {
+  background: rgba(255, 255, 255, 0.05);
+  color: #94a3b8;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.transcript-bubble.final {
+  background: rgba(6, 182, 212, 0.1);
+  color: var(--text-primary);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+}
+
+.speaker-name {
+  font-weight: 600;
+  color: var(--accent-secondary);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  margin-right: 5px;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}

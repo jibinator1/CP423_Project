@@ -1,12 +1,17 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch
 torchaudio
 sentence_transformers
 pyannote.audio
 groq
 soundfile
-dotenv
+python-dotenv
 supabase
 fastapi
 uvicorn
 python-multipart
+livekit-api
+livekit-agents
+livekit-plugins-silero
+livekit-plugins-groq

@@ -1,0 +1,14 @@
+{
+  "name": "cp423-medir-orchestration",
+  "version": "1.0.0",
+  "description": "Unified startup scripts for MedIR Application",
+  "scripts": {
+    "start": "concurrently -n \"BACKEND,FRONTEND,N8N\" -c \"blue,green,magenta\" \"npm run backend\" \"npm run frontend\" \"npm run n8n\"",
+    "backend": "cd project && ..\\venv\\Scripts\\uvicorn.exe livekit_ingest:app --reload --port 8000",
+    "frontend": "cd frontend && npm run dev",
+    "n8n": "npx n8n"
+  },
+  "dependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
