@@ -10,10 +10,11 @@ import {
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { Mic } from 'lucide-react';
+import { RoomEvent } from 'livekit-client';
 import './LiveRecording.css';
 
 // Listen directly to room transcription events — more reliable than useTrackTranscription
-const TranscriptionView = () => {
+const TranscriptionView = ({ patientName }) => {
   const room = useRoomContext();
   const [segments, setSegments] = useState([]);
   const bottomRef = useRef(null);
@@ -38,9 +39,50 @@ const TranscriptionView = () => {
       });
     };
 
-    room.on('transcriptionReceived', handler);
-    return () => room.off('transcriptionReceived', handler);
+    room.on(RoomEvent.TranscriptionReceived, handler);
+    return () => room.off(RoomEvent.TranscriptionReceived, handler);
   }, [room]);
+
+  // Polling fallback to ensure database records always show up in the UI
+  useEffect(() => {
+    if (!room) return;
+    let isActive = true;
+
+    const poll = async () => {
+      try {
+        const params = new URLSearchParams({ session_id: 'clinical-room', limit: 50 });
+        if (patientName) params.append('patient_name', patientName);
+        
+        const res = await fetch(`/api/livekit/segments?${params.toString()}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!isActive) return;
+        
+        if (data.segments && data.segments.length > 0) {
+          setSegments(prev => {
+            const nonFinalLive = prev.filter(s => !s.final);
+            const polled = data.segments.map(seg => ({
+              id: seg.id.toString(),
+              text: seg.content,
+              final: true,
+              speaker: seg.speaker_role === "CLINICIAN" ? "🎙️ Room Mic" : seg.speaker_role
+            }));
+            
+            // Deduplicate if needed, but since we overwrite all finals with polled, it's clean
+            return [...polled, ...nonFinalLive];
+          });
+        }
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    };
+
+    const intervalId = setInterval(poll, 2000);
+    return () => {
+      isActive = false;
+      clearInterval(intervalId);
+    };
+  }, [room, patientName]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -146,16 +188,20 @@ const MicSelector = ({ onDeviceChange }) => {
   );
 };
 
-const LiveRecording = ({ onResult }) => {
+const LiveRecording = ({ onResult, patientName }) => {
   const [token, setToken] = useState("");
   const [url, setUrl] = useState("");
   const [error, setError] = useState(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
 
   const startLive = () => {
     setIsConnecting(true);
     setError(null);
-    fetch('/api/livekit/token?participant_name=Clinician')
+    const params = new URLSearchParams({ participant_name: 'Clinician' });
+    if (patientName) params.append('patient_name', patientName);
+    
+    fetch(`/api/livekit/token?${params.toString()}`)
       .then(res => res.json())
       .then(data => {
         setToken(data.token);
@@ -180,6 +226,34 @@ const LiveRecording = ({ onResult }) => {
       </div>
     );
   }
+
+  const handleGetSummary = async () => {
+    setIsSummarizing(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append('session_id', 'clinical-room');
+      formData.append('patient_name', patientName || '');
+
+      const response = await fetch('/api/livekit/summary', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate summary');
+      }
+
+      const data = await response.json();
+      setToken(""); // Disconnect LiveKit first
+      setUrl("");
+      onResult(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
 
   return (
     <div className="live-container">
@@ -217,15 +291,29 @@ const LiveRecording = ({ onResult }) => {
               </div>
             </div>
           </div>
-          <TranscriptionView />
+          <TranscriptionView patientName={patientName} />
           <ConnectionStatus />
           <DebugTrackInfo />
           <StartAudio label="Start Audio" />
         </LiveKitRoom>
       </div>
-      <button className="secondary-button" onClick={() => { setToken(""); setUrl(""); }} style={{marginTop: '20px'}}>
-        Disconnect
-      </button>
+      <div style={{ display: 'flex', gap: '15px', marginTop: '20px', justifyContent: 'center' }}>
+        <button 
+          className="primary-button" 
+          onClick={handleGetSummary} 
+          disabled={isSummarizing}
+        >
+          {isSummarizing ? "Generating Summary..." : "Get Summary"}
+        </button>
+        <button 
+          className="secondary-button" 
+          onClick={() => { setToken(""); setUrl(""); }} 
+          disabled={isSummarizing}
+        >
+          Disconnect
+        </button>
+      </div>
+      {error && <div className="error-message" style={{marginTop: '15px'}}>{error}</div>}
     </div>
   );
 };

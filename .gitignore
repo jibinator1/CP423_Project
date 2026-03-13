@@ -21,11 +21,6 @@ build/
 .DS_Store
 Thumbs.db
 
-# Audio / large media files
-*.mp3
-*.wav
-*.mp4
-*.webm
 
 # IDE
 .vscode/

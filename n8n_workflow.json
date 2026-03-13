@@ -33,6 +33,16 @@
               "type": "string"
             },
             {
+              "name": "speaker_label",
+              "value": "={{ $json.body.speaker_label || $json.speaker_label || '' }}",
+              "type": "string"
+            },
+            {
+              "name": "patient_name",
+              "value": "={{ $json.body.patient_name || $json.patient_name || '' }}",
+              "type": "string"
+            },
+            {
               "name": "session_id",
               "value": "={{ $json.body.session_id || $json.session_id || '' }}",
               "type": "string"

@@ -97,7 +97,7 @@ class ClinicalIRSystem:
                 "pyannote/speaker-diarization-community-1", token=self.hf_auth_token
             ).to(self.device)
 
-    def process_audio_file(self, audio_path: str, role_mapping: dict[str, str]) -> None:
+    def process_audio_file(self, audio_path: str, role_mapping: dict[str, str], patient_name: str = "") -> None:
         self._ensure_diarization_pipeline()
         print(f"Step 1: Reading {audio_path}...")
         data, samplerate = sf.read(audio_path)
@@ -127,6 +127,9 @@ class ClinicalIRSystem:
             )
 
         print("Step 4: Speaker-aware indexing to Supabase...")
+        session_id = os.path.basename(audio_path)
+        # Note: when uploading audio, you typically know the patient name upfront, 
+        # but here we leave it blank for the generic processor unless passed in.
         for w_seg in transcription.segments:
             midpoint = (w_seg["start"] + w_seg["end"]) / 2
             current_speaker = "UNKNOWN"
@@ -135,16 +138,30 @@ class ClinicalIRSystem:
                     current_speaker = d_seg["speaker"]
                     break
 
-            role = role_mapping.get(current_speaker, "OTHER")
+            role = role_mapping.get(current_speaker, "PATIENT") # Default unknown to PATIENT
             text = w_seg["text"].strip()
             self.index_segment(
                 content=text,
                 speaker_role=role,
-                metadata={"start": w_seg["start"], "end": w_seg["end"]},
+                patient_name=patient_name,
+                speaker_label=current_speaker,
+                session_id=session_id,
+                start_time=float(w_seg["start"]),
+                end_time=float(w_seg["end"]),
+                source="upload",
             )
 
     def index_segment(
-        self, content: str, speaker_role: str, metadata: dict[str, Any] | None = None
+        self,
+        content: str,
+        speaker_role: str,
+        patient_name: str = "",
+        speaker_label: str = "",
+        session_id: str = "",
+        start_time: float = 0.0,
+        end_time: float = 0.0,
+        source: str = "upload",
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         clean_text = content.strip()
         if not clean_text:
@@ -152,9 +169,14 @@ class ClinicalIRSystem:
         embedding = self.embed_model.encode(clean_text).tolist()
         payload = {
             "content": clean_text,
-            "speaker_role": speaker_role,
             "embedding": embedding,
-            "metadata": metadata or {},
+            "speaker_role": speaker_role.strip().upper() or "PATIENT",
+            "patient_name": patient_name.strip(),
+            "speaker_label": speaker_label.strip(),
+            "session_id": session_id,
+            "start_time": start_time,
+            "end_time": end_time,
+            "source": source,
         }
         response = self.supabase.table("clinical_segments").insert(payload).execute()
         records = response.data or []
@@ -193,12 +215,19 @@ class ClinicalIRSystem:
                 os.remove(tmp_path)
         return [] # Fallback return if something unexpected happens
 
-    def _fetch_segments(self, role_filter: str = "ALL") -> list[dict]:
+    def _fetch_segments(
+        self, role_filter: str = "ALL", session_id: str | None = None, patient_name: str | None = None
+    ) -> list[dict]:
         query = self.supabase.table("clinical_segments").select(
-            "id, speaker_role, content, embedding, metadata"
+            "id, session_id, patient_name, speaker_label, speaker_role, content, "
+            "start_time, end_time, source, embedding"
         )
         if role_filter != "ALL":
             query = query.eq("speaker_role", role_filter)
+        if session_id:
+            query = query.eq("session_id", session_id)
+        if patient_name:
+            query = query.eq("patient_name", patient_name)
         response = query.execute()
         return response.data or []
 
@@ -214,9 +243,10 @@ class ClinicalIRSystem:
         return dot / (norm_a * norm_b)
 
     def search_segments(
-        self, query_text: str, top_k: int = 5, role_filter: str = "ALL"
+        self, query_text: str, top_k: int = 5, role_filter: str = "ALL",
+        session_id: str | None = None, patient_name: str | None = None,
     ) -> list[dict[str, Any]]:
-        segments = self._fetch_segments(role_filter=role_filter)
+        segments = self._fetch_segments(role_filter=role_filter, session_id=session_id, patient_name=patient_name)
         if not segments:
             return []
 
@@ -237,9 +267,14 @@ class ClinicalIRSystem:
             scored.append(
                 {
                     "id": seg.get("id"),
+                    "session_id": seg.get("session_id", ""),
+                    "patient_name": seg.get("patient_name", ""),
+                    "speaker_label": seg.get("speaker_label", ""),
                     "speaker_role": seg.get("speaker_role"),
                     "content": seg.get("content"),
-                    "metadata": seg.get("metadata", {}),
+                    "start_time": seg.get("start_time", 0.0),
+                    "end_time": seg.get("end_time", 0.0),
+                    "source": seg.get("source", ""),
                     "semantic_score": semantic_score,
                     "bm25_score": b_score,
                     "score": hybrid_score,
@@ -254,17 +289,17 @@ class ClinicalIRSystem:
         return top_results
 
     def answer_question(
-        self, question: str, top_k: int = 5, role_filter: str = "ALL"
+        self, question: str, top_k: int = 5, role_filter: str = "ALL", session_id: str | None = None, patient_name: str | None = None
     ) -> tuple[str, list[dict[str, Any]]]:
         retrieved = self.search_segments(
-            query_text=question, top_k=top_k, role_filter=role_filter
+            query_text=question, top_k=top_k, role_filter=role_filter, session_id=session_id, patient_name=patient_name
         )
         if not retrieved:
             return "No indexed segments found for this query.", []
 
         context = "\n".join(
             [
-                f"- [Speaker: {seg['speaker_role']}] [Time: {seg['metadata'].get('start', 'N/A')}-{seg['metadata'].get('end', 'N/A')}] (Score={seg['score']:.3f}) {seg['content']}"
+                f"- [Speaker: {seg['speaker_role']}] [Label: {seg.get('speaker_label', '')}] [Time: {seg.get('start_time', 0.0):.2f}-{seg.get('end_time', 0.0):.2f}] (Score={seg['score']:.3f}) {seg['content']}"
                 for seg in retrieved
             ]
         )
@@ -286,19 +321,26 @@ Retrieved Segments:
         )
         return completion.choices[0].message.content, retrieved
 
-    def get_full_transcript(self) -> str:
+    def get_full_transcript(self, session_id: str | None = None, patient_name: str | None = None) -> str:
         print("\n--- Fetching full speaker-separated transcript ---")
-        response = (
+        query = (
             self.supabase.table("clinical_segments")
-            .select("speaker_role, content, metadata")
-            .order("metadata->start", desc=False)
-            .execute()
+            .select("session_id, speaker_label, speaker_role, content, start_time, end_time, source")
+            .order("id", desc=False)
         )
+        if session_id:
+            query = query.eq("session_id", session_id)
+        if patient_name:
+            query = query.eq("patient_name", patient_name)
+        response = query.execute()
 
         transcript_text = ""
         records = response.data or []
         for record in records:
-            line = f"[{record['speaker_role']}]: {record['content']}"
+            ts = f"{record.get('start_time', 0.0):.2f}s–{record.get('end_time', 0.0):.2f}s"
+            label = record.get('speaker_label', '')
+            label_str = f" ({label})" if label else ""
+            line = f"[{record['speaker_role']}{label_str}] [{ts}]: {record['content']}"
             print(line)
             transcript_text += line + "\n"
         return transcript_text
@@ -420,7 +462,8 @@ def main() -> None:
             print("No segments found.")
             return
         for idx, r in enumerate(results, start=1):
-            print(f"{idx}. [{r['speaker_role']}] score={r['score']:.3f} | {r['content']}")
+            label = f" ({r.get('speaker_label', '')})" if r.get('speaker_label') else ""
+            print(f"{idx}. [{r['speaker_role']}{label}] {r.get('start_time', 0.0):.2f}s–{r.get('end_time', 0.0):.2f}s score={r['score']:.3f} | {r['content']}")
         return
 
     if args.qa_query:

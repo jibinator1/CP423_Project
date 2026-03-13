@@ -17,11 +17,6 @@
   gap: 1.5rem;
 }
 
-@media (min-width: 768px) {
-  .results-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
 
 .result-card {
   background: rgba(255, 255, 255, 0.02);

@@ -164,6 +164,7 @@ async def run_agent():
                                 payload = {
                                     "content": transcript,
                                     "speaker_role": "PATIENT" if "Patient" in participant.identity else "CLINICIAN",
+                                    "speaker_label": participant.identity,
                                     "session_id": room.name,
                                     "participant_id": participant.identity,
                                     "start": 0,

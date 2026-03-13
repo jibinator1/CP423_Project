@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { UploadCloud, FileAudio, CheckCircle, AlertCircle } from 'lucide-react';
 import './FileUpload.css';
 
-const FileUpload = ({ onResult }) => {
+const FileUpload = ({ onResult, patientName }) => {
   const [file, setFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -43,6 +43,7 @@ const FileUpload = ({ onResult }) => {
 
     const formData = new FormData();
     formData.append('audio_file', file);
+    formData.append('patient_name', patientName || '');
 
     try {
       const response = await fetch('/api/upload_mp3', {
