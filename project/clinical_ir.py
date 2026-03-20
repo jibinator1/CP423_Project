@@ -59,6 +59,102 @@ class BM25Retriever:
             scores[i] = score
         return scores
 
+class VectorSpaceRetriever:
+    def __init__(self):
+        self.corpus: list[dict[str, Any]] = []
+        self.vocabulary: set[str] = set()
+        self.df: dict[str, int] = {}
+        self.idf: dict[str, float] = {}
+        self.N: int = 0
+        self.doc_tfs: list[dict[str, float]] = []
+
+    def tokenize(self, text: str) -> list[str]:
+        return re.findall(r'\w+', text.lower())
+
+    def fit(self, corpus: list[dict]):
+        self.corpus = corpus
+        self.N = len(corpus)
+        if self.N == 0: return
+        
+        for doc in corpus:
+            tokens = self.tokenize(doc.get("content", ""))
+            freqs = Counter(tokens)
+            self.doc_tfs.append(freqs)
+            for word in freqs.keys():
+                self.vocabulary.add(word)
+                self.df[word] = self.df.get(word, 0) + 1
+        
+        for word, freq in self.df.items():
+            self.idf[word] = math.log10(self.N / freq)
+
+    def get_scores(self, query: str) -> list[float]:
+        scores = [0.0] * self.N
+        if self.N == 0: return scores
+        
+        q_tokens = self.tokenize(query)
+        q_freqs = Counter(q_tokens)
+        
+        # Calculate query vector (TF-IDF)
+        q_vec = {}
+        q_norm = 0.0
+        for word, freq in q_freqs.items():
+            if word in self.idf:
+                tf_idf = freq * self.idf[word]
+                q_vec[word] = tf_idf
+                q_norm += tf_idf ** 2
+        q_norm = math.sqrt(q_norm)
+        
+        if q_norm == 0: return scores
+
+        for i, doc_tf in enumerate(self.doc_tfs):
+            dot_product = 0.0
+            doc_norm = 0.0
+            # We only need dot product for words in query
+            for word, q_val in q_vec.items():
+                if word in doc_tf:
+                    dot_product += q_val * (doc_tf[word] * self.idf[word])
+            
+            # For doc norm, we need all words in doc
+            for word, freq in doc_tf.items():
+                doc_norm += (freq * self.idf.get(word, 0)) ** 2
+            doc_norm = math.sqrt(doc_norm)
+            
+            if doc_norm > 0:
+                scores[i] = dot_product / (q_norm * doc_norm)
+        return scores
+
+class BooleanRetriever:
+    def __init__(self):
+        self.corpus: list[dict[str, Any]] = []
+        self.N: int = 0
+
+    def tokenize(self, text: str) -> set[str]:
+        return set(re.findall(r'\w+', text.lower()))
+
+    def fit(self, corpus: list[dict]):
+        self.corpus = corpus
+        self.N = len(corpus)
+
+    def get_scores(self, query: str) -> list[float]:
+        scores = [0.0] * self.N
+        if self.N == 0: return scores
+        
+        q_tokens = self.tokenize(query)
+        if not q_tokens: return scores
+
+        for i, doc in enumerate(self.corpus):
+            doc_tokens = self.tokenize(doc.get("content", ""))
+            # Binary match: 1.0 if all query words are present, 0.0 otherwise
+            # Or simplified: percentage of query words present
+            matches = q_tokens.intersection(doc_tokens)
+            if len(matches) == len(q_tokens):
+                scores[i] = 1.0
+            elif len(matches) > 0:
+                scores[i] = len(matches) / len(q_tokens)
+            else:
+                scores[i] = 0.0
+        return scores
+
 from dotenv import load_dotenv
 from groq import Groq
 from supabase import create_client
@@ -268,24 +364,39 @@ class ClinicalIRSystem:
     def search_segments(
         self, query_text: str, top_k: int = 5, role_filter: str = "ALL",
         session_id: str | None = None, patient_name: str | None = None,
+        model_type: str = "hybrid"
     ) -> list[dict[str, Any]]:
         segments = self._fetch_segments(role_filter=role_filter, session_id=session_id, patient_name=patient_name)
         if not segments:
             return []
 
-        q_embedding = self.embed_model.encode(query_text).tolist()
-        
-        bm25 = BM25Retriever()
-        bm25.fit(segments)
-        bm25_scores = bm25.get_scores(query_text)
-
         scored: list[dict[str, Any]] = []
+        
+        if model_type == "vsm":
+            vsm = VectorSpaceRetriever()
+            vsm.fit(segments)
+            scores = vsm.get_scores(query_text)
+        elif model_type == "boolean":
+            bool_ret = BooleanRetriever()
+            bool_ret.fit(segments)
+            scores = bool_ret.get_scores(query_text)
+        elif model_type == "bm25":
+            bm25 = BM25Retriever()
+            bm25.fit(segments)
+            scores = bm25.get_scores(query_text)
+        else: # hybrid
+            q_embedding = self.embed_model.encode(query_text).tolist()
+            bm25 = BM25Retriever()
+            bm25.fit(segments)
+            bm25_scores = bm25.get_scores(query_text)
+            scores = []
+            for i, seg in enumerate(segments):
+                semantic_score = self._cosine_similarity(q_embedding, seg.get("embedding", []))
+                b_score = bm25_scores[i]
+                scores.append(semantic_score + (b_score * 0.1))
+
         for i, seg in enumerate(segments):
-            semantic_score = self._cosine_similarity(q_embedding, seg.get("embedding", []))
-            b_score = bm25_scores[i]
-            
-            # Hybrid rank: Combine Semantic (approx -1 to 1) and BM25 linearly.
-            hybrid_score = semantic_score + (b_score * 0.1)
+            score = scores[i]
             
             scored.append(
                 {
@@ -298,9 +409,8 @@ class ClinicalIRSystem:
                     "start_time": seg.get("start_time", 0.0),
                     "end_time": seg.get("end_time", 0.0),
                     "source": seg.get("source", ""),
-                    "semantic_score": semantic_score,
-                    "bm25_score": b_score,
-                    "score": hybrid_score,
+                    "score": score,
+                    "model": model_type
                 }
             )
 
@@ -312,10 +422,13 @@ class ClinicalIRSystem:
         return top_results
 
     def answer_question(
-        self, question: str, top_k: int = 5, role_filter: str = "ALL", session_id: str | None = None, patient_name: str | None = None
+        self, question: str, top_k: int = 5, role_filter: str = "ALL", 
+        session_id: str | None = None, patient_name: str | None = None,
+        model_type: str = "hybrid"
     ) -> tuple[str, list[dict[str, Any]]]:
         retrieved = self.search_segments(
-            query_text=question, top_k=top_k, role_filter=role_filter, session_id=session_id, patient_name=patient_name
+            query_text=question, top_k=top_k, role_filter=role_filter, 
+            session_id=session_id, patient_name=patient_name, model_type=model_type
         )
         if not retrieved:
             return "No indexed segments found for this query.", []
@@ -408,7 +521,8 @@ SUMMARY FORMAT:
                 continue
 
             retrieved = self.search_segments(
-                query_text=query_text, top_k=top_k, role_filter=role_filter
+                query_text=query_text, top_k=top_k, role_filter=role_filter,
+                model_type=item.get("model_type", "hybrid")
             )
             retrieved_contents = [r["content"] for r in retrieved]
             hits = sum(1 for c in retrieved_contents if c in relevant_contents)
@@ -463,6 +577,12 @@ def parse_args() -> argparse.Namespace:
         default="ALL",
         help="Restrict retrieval by speaker role",
     )
+    parser.add_argument(
+        "--model",
+        choices=["hybrid", "bm25", "vsm", "boolean"],
+        default="hybrid",
+        help="IR model to use",
+    )
     return parser.parse_args()
 
 
@@ -479,7 +599,8 @@ def main() -> None:
     if args.search_query:
         print(f"\n--- SEARCH RESULTS (top {args.top_k}, role={args.role_filter}) ---")
         results = bot.search_segments(
-            query_text=args.search_query, top_k=args.top_k, role_filter=args.role_filter
+            query_text=args.search_query, top_k=args.top_k, role_filter=args.role_filter,
+            model_type=args.model
         )
         if not results:
             print("No segments found.")

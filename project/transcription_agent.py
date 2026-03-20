@@ -19,6 +19,8 @@ load_dotenv(os.path.join(root_dir, ".env"))
 
 # n8n Webhook URL (from environment or local default)
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/livekit-segment-ingest")
+# Direct Backend Ingest URL
+BACKEND_INGEST_URL = os.getenv("BACKEND_INGEST_URL", "http://localhost:8000/livekit/segment")
 INGEST_TOKEN = os.getenv("LIVEKIT_INGEST_TOKEN", "my_secret_ingest_token")
 
 async def run_agent():
@@ -69,7 +71,8 @@ async def run_agent():
     # Use StreamAdapter to avoid the broken OpenAI Realtime/WebSocket implementation in Groq plugin
     try:
         raw_stt = groq.STT(model="whisper-large-v3-turbo")
-        stt_engine = stt.StreamAdapter(stt=raw_stt, vad=silero.VAD.load())
+        vad = silero.VAD.load(min_silence_duration=1.5)  # Wait 1.5s of silence before splitting
+        stt_engine = stt.StreamAdapter(stt=raw_stt, vad=vad)
         print("DEBUG: STT Engine (Adapted) initialized.", flush=True)
     except Exception as e:
         print(f"ERROR: Failed to initialize STT Engine: {e}", flush=True)
@@ -162,6 +165,7 @@ async def run_agent():
                             try:
                                 payload = {
                                     "content": transcript,
+                                    "patient_name": "", # empty allows backend to fallback to session-assigned name
                                     "speaker_role": "PATIENT" if "Patient" in participant.identity else "CLINICIAN",
                                     "speaker_label": participant.identity,
                                     "session_id": room.name,
@@ -171,10 +175,22 @@ async def run_agent():
                                 }
                                 logger.info(f"n8n SENDING: {transcript}")
                                 async with aiohttp.ClientSession() as session:
-                                    async with session.post(N8N_WEBHOOK_URL, json=payload, headers={"x-api-key": INGEST_TOKEN}, timeout=5) as resp:
-                                        logger.info(f"n8n RESPONSE: {resp.status}")
+                                    # 1. Forward to n8n (Workflow)
+                                    try:
+                                        async with session.post(N8N_WEBHOOK_URL, json=payload, headers={"x-api-key": INGEST_TOKEN}, timeout=2) as resp:
+                                            logger.info(f"n8n RESPONSE: {resp.status}")
+                                    except Exception as e:
+                                        logger.warning(f"n8n FORWARD failed: {e}")
+
+                                    # 2. Forward DIRECTLY to Backend (Primary reliable path)
+                                    # Backend has dedup guard so this won't create duplicates even if n8n also forwards
+                                    try:
+                                        async with session.post(BACKEND_INGEST_URL, json=payload, headers={"x-api-key": INGEST_TOKEN}, timeout=2) as resp:
+                                            logger.info(f"BACKEND RESPONSE: {resp.status}")
+                                    except Exception as e:
+                                        logger.error(f"BACKEND FORWARD FAILED: {e}")
                             except Exception as e:
-                                logger.error(f"n8n FORWARD FAILED: {e}")
+                                logger.error(f"Communication error: {e}")
             except Exception as e:
                 logger.error(f"CRITICAL Error in handle_results for {participant.identity}: {e}")
 

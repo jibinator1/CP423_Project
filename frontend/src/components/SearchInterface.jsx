@@ -7,6 +7,7 @@ const SearchInterface = ({ patientName }) => {
   const [results, setResults] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState(null);
+  const [model, setModel] = useState('hybrid');
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -17,7 +18,10 @@ const SearchInterface = ({ patientName }) => {
 
     try {
       // Build query string
-      const params = new URLSearchParams({ query: query.trim() });
+      const params = new URLSearchParams({ 
+        query: query.trim(),
+        model: model
+      });
       if (patientName?.trim()) {
         params.append('patient_name', patientName.trim());
       }
@@ -54,6 +58,17 @@ const SearchInterface = ({ patientName }) => {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+          <select 
+            value={model} 
+            onChange={(e) => setModel(e.target.value)}
+            className="model-select"
+            style={{ padding: '8px', borderRadius: '4px', background: '#1a1a2e', color: 'white', border: '1px solid #7c3aed', marginRight: '10px' }}
+          >
+            <option value="hybrid">Hybrid (Semantic + BM25)</option>
+            <option value="bm25">BM25 (Classic IR)</option>
+            <option value="vsm">Vector Space Model (TF-IDF)</option>
+            <option value="boolean">Boolean (Set Matching)</option>
+          </select>
           <button 
             type="submit" 
             className="primary search-btn"

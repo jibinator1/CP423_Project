@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from livekit import api
 from pydantic import BaseModel, Field
+import threading
 
 try:
     from .clinical_ir import ClinicalIRSystem
@@ -40,11 +41,22 @@ class AudioPayload(BaseModel):
 
 load_dotenv()
 app = FastAPI(title="Clinical IR LiveKit Ingest Service")
+
+# Add CORS middleware to allow the frontend to talk to the backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For development; can be restricted to specific domains later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 bot: ClinicalIRSystem | None = None
 ingest_token = os.getenv("LIVEKIT_INGEST_TOKEN", "").strip()
 
 # In-memory store mapping session_id (room name) to patient_name for active livekit sessions
 SESSION_PATIENTS: dict[str, str] = {}
+_bot_lock = threading.Lock()
 
 def _authorize(x_api_key: str | None) -> None:
     if ingest_token and x_api_key != ingest_token:
@@ -54,7 +66,9 @@ def _authorize(x_api_key: str | None) -> None:
 def _get_bot() -> ClinicalIRSystem:
     global bot
     if bot is None:
-        bot = ClinicalIRSystem()
+        with _bot_lock:
+            if bot is None:
+                bot = ClinicalIRSystem()
     return bot
 
 
@@ -83,8 +97,18 @@ def ingest_segment(payload: SegmentPayload, x_api_key: str | None = Header(defau
 
     # Resolve patient_name: use payload if provided, otherwise look up in session store
     session_id = payload.session_id or ""
-    patient_name = payload.patient_name or SESSION_PATIENTS.get(session_id, "")
+    provided_name = (payload.patient_name or "").strip()
+    if not provided_name or provided_name.lower() == "unknown":
+        patient_name = SESSION_PATIENTS.get(session_id, "")
+    else:
+        patient_name = provided_name
 
+    # Simple deduplication: don't index the same content for the same session twice in a row
+    # This handles cases where both n8n and the agent might try to send the same segment
+    last_indexed = getattr(runtime_bot, "_last_indexed_content", None)
+    if last_indexed == (session_id, role, payload.content.strip()):
+        return {"status": "skipped_duplicate"}
+    
     record = runtime_bot.index_segment(
         content=payload.content,
         speaker_role=role,
@@ -96,6 +120,7 @@ def ingest_segment(payload: SegmentPayload, x_api_key: str | None = Header(defau
         source="livekit",
         metadata=md,
     )
+    runtime_bot._last_indexed_content = (session_id, role, payload.content.strip())
     return {"status": "indexed", "record_id": record.get("id"), "speaker_role": role}
 
 
@@ -175,7 +200,11 @@ async def upload_mp3(
             if results:
                 top_result = results[0]
             
-        return {"summary": summary, "top_result": top_result}
+        return {
+            "summary": summary, 
+            "top_result": top_result,
+            "transcript": full_transcript
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -222,7 +251,11 @@ async def process_live_audio(
             if results:
                 top_result = results[0]
                 
-        return {"summary": summary, "top_result": top_result}
+        return {
+            "summary": summary, 
+            "top_result": top_result, 
+            "transcript": full_text
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -277,13 +310,14 @@ def get_livekit_segments(session_id: str = "clinical-room", patient_name: str | 
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/search")
-def search_api(query: str, patient_name: str | None = None, top_k: int = 5):
+def search_api(query: str, patient_name: str | None = None, top_k: int = 5, model: str = "hybrid"):
     runtime_bot = _get_bot()
     try:
         results = runtime_bot.search_segments(
             query_text=query,
             top_k=top_k,
-            patient_name=patient_name
+            patient_name=patient_name,
+            model_type=model
         )
         return {"results": results}
     except Exception as e:

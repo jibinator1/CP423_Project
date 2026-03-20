@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Database, ShieldAlert } from 'lucide-react';
+import { FileText, Database, ShieldAlert, List } from 'lucide-react';
 import './ResultsDisplay.css';
 
 const ResultsDisplay = ({ data, title }) => {
@@ -33,6 +33,38 @@ const ResultsDisplay = ({ data, title }) => {
         </div>
 
         {/* The retrieve-card "Top Related Result" section was removed in favor of the global Search bar */}
+      </div>
+
+      <div className="results-grid" style={{marginTop: '20px'}}>
+        <div className="result-card transcript-card" style={{gridColumn: '1 / -1'}}>
+          <div className="card-header">
+            <div className="icon-wrapper search-icon" style={{backgroundColor: 'rgba(167, 139, 250, 0.2)', color: '#a78bfa'}}>
+              <List size={20} />
+            </div>
+            <h3>Full Transcript</h3>
+          </div>
+          <div className="card-body">
+            {data.transcript ? (
+              <div className="prose transcript-box" style={{ 
+                maxHeight: '400px', 
+                overflowY: 'auto', 
+                backgroundColor: 'rgba(0,0,0,0.2)', 
+                padding: '15px', 
+                borderRadius: '8px',
+                whiteSpace: 'pre-wrap',
+                fontFamily: 'monospace',
+                fontSize: '13px',
+                lineHeight: '1.5',
+                textAlign: 'left',
+                color: 'rgba(255,255,255,0.9)'
+              }}>
+                {data.transcript}
+              </div>
+            ) : (
+              <p className="no-data">No full transcript available for this session.</p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

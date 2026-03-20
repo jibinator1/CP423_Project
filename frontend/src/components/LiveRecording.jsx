@@ -23,19 +23,29 @@ const TranscriptionView = ({ patientName }) => {
     if (!room) return;
 
     const handler = (segments, participant) => {
-      console.log('transcriptionReceived event!', segments, participant?.identity);
+      console.log('[Live] Transcription received:', segments.map(s => s.text).join(' '), 'from:', participant?.identity);
+      
+      // Improved role detection: Check identity case-insensitively
+      const identity = (participant?.identity || "").toLowerCase();
+      const role = identity.includes('clinician') ? 'CLINICIAN' : (identity.includes('patient') ? 'PATIENT' : 'PATIENT');
+      const label = role === 'CLINICIAN' ? "👨‍⚕️ Clinician" : "👤 Patient";
+
       setSegments(prev => {
         const updated = [...prev];
         for (const seg of segments) {
+          // Check for duplication/update by ID
           const idx = updated.findIndex(s => s.id === seg.id);
           if (idx >= 0) {
-            updated[idx] = { ...seg, speaker: participant?.identity || 'Speaker' };
+            updated[idx] = { ...seg, speaker: label, role };
           } else {
-            updated.push({ ...seg, speaker: participant?.identity || 'Speaker' });
+            // Check for text-based duplication (especially for late-arriving finalized segments)
+            const textDup = updated.find(s => s.final && s.text.trim() === seg.text.trim());
+            if (!textDup) {
+              updated.push({ ...seg, speaker: label, role });
+            }
           }
         }
-        // Keep only last 50
-        return updated.slice(-50);
+        return updated.slice(-100);
       });
     };
 
@@ -43,7 +53,7 @@ const TranscriptionView = ({ patientName }) => {
     return () => room.off(RoomEvent.TranscriptionReceived, handler);
   }, [room]);
 
-  // Polling fallback to ensure database records always show up in the UI
+  // Polling fallback to ensure database records always show up Corrected/Finalized
   useEffect(() => {
     if (!room) return;
     let isActive = true;
@@ -58,18 +68,31 @@ const TranscriptionView = ({ patientName }) => {
         const data = await res.json();
         if (!isActive) return;
         
-        if (data.segments && data.segments.length > 0) {
+        if (data.segments) {
           setSegments(prev => {
-            const nonFinalLive = prev.filter(s => !s.final);
+            const currentNonFinal = prev.filter(s => !s.final);
+            const currentFinal = prev.filter(s => s.final);
+            
             const polled = data.segments.map(seg => ({
-              id: seg.id.toString(),
+              id: seg.id.toString(), // Database ID
               text: seg.content,
               final: true,
-              speaker: seg.speaker_role === "CLINICIAN" ? "🎙️ Room Mic" : seg.speaker_role
+              role: seg.speaker_role,
+              speaker: seg.speaker_role === "CLINICIAN" ? "👨‍⚕️ Clinician" : "👤 Patient"
             }));
             
-            // Deduplicate if needed, but since we overwrite all finals with polled, it's clean
-            return [...polled, ...nonFinalLive];
+            // Merge: Keep all polled segments, and add any live segments that aren't represented in the poll yet
+            const mergedFinal = [...polled];
+            for (const live of currentFinal) {
+              // If this live segment isn't already in the poll (by ID or exact text)
+              const exists = polled.find(p => p.id === live.id || p.text.trim() === live.text.trim());
+              if (!exists) {
+                mergedFinal.push(live);
+              }
+            }
+
+            // Sort by ID/Order if possible, otherwise just append
+            return [...mergedFinal.slice(-100), ...currentNonFinal];
           });
         }
       } catch (err) {
@@ -77,44 +100,47 @@ const TranscriptionView = ({ patientName }) => {
       }
     };
 
-    const intervalId = setInterval(poll, 2000);
+    const intervalId = setInterval(poll, 1500); // Slightly slower poll to reduce terminal noise
     return () => {
       isActive = false;
       clearInterval(intervalId);
     };
   }, [room, patientName]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom only when NEW segments are added (not on every poll refresh)
+  const prevCountRef = useRef(0);
   useEffect(() => {
-    if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (segments.length > prevCountRef.current && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+    prevCountRef.current = segments.length;
   }, [segments]);
 
-  // Also expose a test injection
-  window.injectTestTranscript = () => {
-    setSegments(prev => [...prev, {
-      id: Math.random().toString(),
-      text: 'Test transcription bubble! UI is working.',
-      final: true,
-      speaker: 'Test Bot'
-    }]);
-  };
-
   const finalSegments = segments.filter(s => s.final);
+  const interimSegments = segments.filter(s => !s.final);
 
   return (
-    <div className="transcription-container" style={{ width: '100%', padding: '15px', maxHeight: '300px', overflowY: 'auto' }}>
-      {finalSegments.length === 0 && (
-        <div style={{ color: 'rgba(255,255,255,0.4)', textAlign: 'center', fontSize: '13px', marginTop: '10px' }}>
-          Transcription will appear here when you speak...
-        </div>
-      )}
-      {finalSegments.map((s) => (
-        <div key={s.id} className="transcript-bubble final">
-          <span className="speaker-name">{s.speaker}: </span>
-          {s.text}
-        </div>
-      ))}
-      <div ref={bottomRef} />
+    <div className="transcription-view" style={{ width: '100%', padding: '5px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div className="transcription-container" style={{ width: '100%', padding: '15px', maxHeight: '400px', overflowY: 'auto', backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: '12px' }}>
+        {finalSegments.length === 0 && interimSegments.length === 0 && (
+          <div style={{ color: 'rgba(255,255,255,0.4)', textAlign: 'center', fontSize: '13px', marginTop: '10px' }}>
+            Transcription will appear here when you speak...
+          </div>
+        )}
+        {finalSegments.map((s) => (
+          <div key={s.id} className={`transcript-bubble final ${s.role?.toLowerCase()}`}>
+            <span className="speaker-name">{s.speaker}: </span>
+            {s.text}
+          </div>
+        ))}
+        {interimSegments.map((s) => (
+          <div key={s.id} className="transcript-bubble interim" style={{ fontStyle: 'italic', opacity: 0.7 }}>
+            <span className="speaker-name">{s.speaker}: </span>
+            {s.text}...
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
     </div>
   );
 };
@@ -194,11 +220,12 @@ const LiveRecording = ({ onResult, patientName }) => {
   const [error, setError] = useState(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [selectedRole, setSelectedRole] = useState("Clinician");
 
   const startLive = () => {
     setIsConnecting(true);
     setError(null);
-    const params = new URLSearchParams({ participant_name: 'Clinician' });
+    const params = new URLSearchParams({ participant_name: selectedRole });
     if (patientName) params.append('patient_name', patientName);
     
     fetch(`/api/livekit/token?${params.toString()}`)
@@ -218,9 +245,35 @@ const LiveRecording = ({ onResult, patientName }) => {
     return (
       <div className="live-container">
         <h2>Live Recording</h2>
-        <p>Connect to the LiveKit room to begin.</p>
+        <p>Choose your role and connect to the room.</p>
+        
+        <div className="role-selection" style={{ display: 'flex', gap: '15px', justifyContent: 'center', marginBottom: '20px' }}>
+          <button 
+            className={`secondary-button ${selectedRole === 'Clinician' ? 'active' : ''}`}
+            onClick={() => setSelectedRole('Clinician')}
+            style={{ 
+              borderColor: selectedRole === 'Clinician' ? '#a78bfa' : 'rgba(255,255,255,0.1)',
+              backgroundColor: selectedRole === 'Clinician' ? 'rgba(167, 139, 250, 0.1)' : 'transparent',
+              color: selectedRole === 'Clinician' ? '#a78bfa' : 'white'
+            }}
+          >
+            👨‍⚕️ Clinician
+          </button>
+          <button 
+            className={`secondary-button ${selectedRole === 'Patient' ? 'active' : ''}`}
+            onClick={() => setSelectedRole('Patient')}
+            style={{ 
+              borderColor: selectedRole === 'Patient' ? '#67e8f9' : 'rgba(255,255,255,0.1)',
+              backgroundColor: selectedRole === 'Patient' ? 'rgba(103, 232, 249, 0.1)' : 'transparent',
+              color: selectedRole === 'Patient' ? '#67e8f9' : 'white'
+            }}
+          >
+            👤 Patient
+          </button>
+        </div>
+
         <button className="primary-button" onClick={startLive} disabled={isConnecting}>
-          {isConnecting ? "Connecting..." : "Enable Live Talk"}
+          {isConnecting ? "Connecting..." : `Join Room as ${selectedRole}`}
         </button>
         {error && <div className="error-message">{error}</div>}
       </div>
