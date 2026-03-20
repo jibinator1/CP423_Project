@@ -3,11 +3,12 @@ import FileUpload from './components/FileUpload';
 import LiveRecording from './components/LiveRecording';
 import ResultsDisplay from './components/ResultsDisplay';
 import SearchInterface from './components/SearchInterface';
-import { FileAudio, Mic, Activity, Search, User } from 'lucide-react';
+import EvaluationDashboard from './components/EvaluationDashboard';
+import { FileAudio, Mic, Activity, Search, User, GitCompare, BarChart3 } from 'lucide-react';
 import './App.css';
 
 function App() {
-  const [activeMode, setActiveMode] = useState('upload'); // 'upload', 'live', or 'search'
+  const [activeMode, setActiveMode] = useState('upload'); // 'upload', 'live', 'search', 'evaluate'
   const [patientName, setPatientName] = useState('');
   const [results, setResults] = useState(null);
 
@@ -30,14 +31,14 @@ function App() {
           <User size={20} style={{marginRight: '10px', color: '#a78bfa'}} />
           <input 
             type="text" 
-            placeholder="Patient Name (e.g., John Doe)" 
+            placeholder="Patient Name (e.g., John Doe) - Used for filtering search and evaluation" 
             value={patientName}
             onChange={(e) => setPatientName(e.target.value)}
             style={{flex: 1, background: 'transparent', border: 'none', color: 'white', fontSize: '16px', outline: 'none'}}
           />
         </div>
 
-        <div className="mode-toggle animate-fade-in" style={{animationDelay: '0.2s'}}>
+        <div className="mode-toggle animate-fade-in" style={{animationDelay: '0.2s', flexWrap: 'wrap'}}>
           <button 
             className={`mode-btn ${activeMode === 'upload' ? 'active' : ''}`}
             onClick={() => { setActiveMode('upload'); setResults(null); }}
@@ -48,13 +49,19 @@ function App() {
             className={`mode-btn ${activeMode === 'live' ? 'active' : ''}`}
             onClick={() => { setActiveMode('live'); setResults(null); }}
           >
-            <Mic size={18} /> Live Recording
+            <Mic size={18} /> Live Session
           </button>
           <button 
             className={`mode-btn ${activeMode === 'search' ? 'active' : ''}`}
             onClick={() => { setActiveMode('search'); setResults(null); }}
           >
             <Search size={18} /> Search
+          </button>
+          <button 
+            className={`mode-btn ${activeMode === 'evaluate' ? 'active' : ''}`}
+            onClick={() => { setActiveMode('evaluate'); setResults(null); }}
+          >
+            <BarChart3 size={18} /> Metrics Setup
           </button>
         </div>
 
@@ -68,11 +75,14 @@ function App() {
           {activeMode === 'search' && (
             <SearchInterface patientName={patientName} />
           )}
+          {activeMode === 'evaluate' && (
+            <EvaluationDashboard />
+          )}
         </div>
 
-        {results && activeMode !== 'search' && (
+        {results && ['upload', 'live'].includes(activeMode) && (
           <div className="results-section">
-            <ResultsDisplay data={results} title={activeMode === 'upload' ? "Upload Results" : "Live Recording Results"} />
+            <ResultsDisplay data={results} title={activeMode === 'upload' ? "Upload Results" : "Live Session Results"} />
           </div>
         )}
       </main>

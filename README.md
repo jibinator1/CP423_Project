@@ -1,166 +1,141 @@
-# CP423 Clinical IR System — Live Medical Transcription & IR Pipeline
+# CP423 Clinical IR System 
 
-A real-time medical audio transcription and information retrieval system built for CP423. It features a **React + Vite** frontend, a **FastAPI** backend for IR/search, a **LiveKit-based transcription agent** (powered by Groq Whisper), and **n8n** for orchestration.
+An end-to-end conversational medical interview system designed for the **Information Retrieval & Search Engines** course project. The system processes spoken clinical interviews, enabling speaker-aware indexing, structured summarization, symptom-based question answering, and comprehensive IR evaluation.
+
+## 🌟 Key Features (100% Free Tier APIs)
+
+- 🎙️ **Live & Offline Diarization**: Separates Patient vs. Clinician audio using Pyannote (offline) and LiveKit tracks (real-time).
+- 🧠 **Speech-to-Text**: High-accuracy medical transcription powered by **Groq Whisper** (`whisper-large-v3-turbo`).
+- 🔍 **Multi-Model Search Engine**: Provides side-by-side comparison of **Hybrid (Vector + BM25)**, **Classic BM25**, **Vector Space Model (VSM)**, and **Boolean** retrieval.
+- 📊 **IR Evaluation Dashboard**: Calculates **Precision@K, Recall@K, F1@K, and MAP** across multiple $K$ values and speaker roles.
+- 🤖 **LLM Clinical Summarization**: Generates grounded medical summaries, structured follow-up plans, and answers clinical queries with timestamped citations.
+- 🔄 **n8n Orchestration**: Decentralized webhook workflow for routing transcription segments.
 
 ---
 
-## Architecture
+## 🏗️ System Architecture
 
+```text
+Clinician Browser
+    │  (WebRTC Audio Tracks)
+    ▼
+LiveKit Cloud ─────────────────────────────────────────────────────────┐
+    │  (Patient & Clinician Tracks)     │  (Transcription Events)      │
+    ▼                                   ▼                              │
+Python Transcription Agent         React Frontend (localhost:5173)     │
+ - Groq Whisper STT                  - Speaker-Aware Search            │
+ - Silero VAD                        - Model Comparison UI             │
+ - Publishes text back to Room       - Evaluation Dashboard            │
+    │                                                                  │
+    │  (Webhook POST)                                                  │
+    ▼                                                                  │
+n8n (localhost:5678)                                                   │
+    │  (Normalize Payload)                                             │
+    ▼                                                                  │
+FastAPI Backend (localhost:8000) ◄─────────────────────────────────────┘
+ - BM25, VSM, Boolean, Hybrid IR logic (SentenceTransformers)
+ - Supabase Vector Database (Indexes segments with speaker metadata)
+ - LLM Summarization & Grounded QA (Llama 3 via Groq)
 ```
-Browser (Clinician)
-    │  (WebRTC Audio)
-    ▼
-LiveKit Cloud ─────────────────────────────────────────────────────────
-    │  (Audio Stream)                   │  (Transcription Events)
-    ▼                                   ▼
-Python Transcription Agent         React Frontend (localhost:5173)
- - Groq Whisper STT                  - Displays transcript bubbles
- - Silero VAD                        - Microphone selector
- - Publishes transcription back       - Debug track info
-    │
-    │  (Webhook POST)
-    ▼
-n8n (localhost:5678)
-    │
-    │  (Normalized Payload)
-    ▼
-FastAPI Backend (localhost:8000)
- - BM25 + Vector Hybrid IR
- - Clinical Summary Generation
-```
+
+**Speaker Separation Strategy**:
+1. **Offline Mode (`/api/upload_mp3`)**: Uses `pyannote.audio` to identify speaker boundaries in single MP3 files, mapping them to Whisper transcript segments.
+2. **Live Mode (LiveKit)**: Assigns dedicated WebRTC audio tracks to the Clinician and Patient. No diarization required; LiveKit natively guarantees perfect speaker attribution.
 
 ---
 
-## Features
-
-- 🎙️ **Live Transcription** — Real-time speech-to-text via Groq Whisper (`whisper-large-v3-turbo`) and Silero VAD
-- 🔍 **Hybrid IR** — BM25 + vector search for speaker-aware clinical information retrieval
-- 📊 **Precision@K / Recall@K** metrics
-- 🧠 **Clinical Summary** — LLM-generated grounded answers and follow-up plans
-- 🔄 **n8n Orchestration** — Normalizes and routes transcription segments
-- 🎛️ **Microphone Selector** — Pick your exact audio input device in the UI
-- 📤 **MP3 Upload** — Offline audio file analysis with diarization
-
----
-
-## Setup
+## 🚀 Setup & Installation
 
 ### 1. Prerequisites
-
 - **Python 3.10+**
 - **Node.js 18+**
-- **n8n** (via `npx n8n`)
-- A free [Groq API key](https://console.groq.com/)
-- A free [LiveKit Cloud account](https://livekit.io/)
+- **n8n** (installed globally via `npm i -g n8n` or run via `npx n8n`)
 
-### 2. Environment Variables
-
-Copy `.env.example` to `.env` and fill in your credentials:
-
+### 2. Free-Tier API Configuration
+Copy the provided environment template:
 ```bash
 cp .env.example .env
 ```
 
-```ini
-GROQ_API_KEY="your-groq-api-key"
-LIVEKIT_URL="wss://your-project.livekit.cloud"
-LIVEKIT_API_KEY="your-livekit-api-key"
-LIVEKIT_API_SECRET="your-livekit-api-secret"
-LIVEKIT_INGEST_TOKEN="optional-token-for-ingest-endpoint"
-N8N_WEBHOOK_URL="http://localhost:5678/webhook/livekit-segment-ingest"
-```
+Open `.env` and configure the following free accounts:
+1. **Groq (LLM & Whisper)**: Get a key at [console.groq.com](https://console.groq.com/)
+2. **Supabase (Vector DB)**: Create a project at [supabase.com](https://supabase.com/) and paste the URL/Anon Key.
+3. **Hugging Face (Pyannote)**: Create an access token at [huggingface.co](https://huggingface.co/settings/tokens) (Ensure you accept the Pyannote user conditions on HF).
+4. **LiveKit Cloud (WebRTC)**: Create a free project at [livekit.io](https://livekit.io/) to get your URL, API Key, and Secret.
 
-### 3. Python Backend & Transcription Agent
-
-```powershell
-# From the project root
+### 3. Backend Setup
+```bash
+# Create and activate virtual environment
 python -m venv venv
+# Windows
 .\venv\Scripts\activate
+# Mac/Linux
+source venv/bin/activate
+
+# Install dependencies (PyTorch, sentence-transformers, FastAPI, etc.)
 pip install -r requirements.txt
 ```
 
-### 4. Frontend
-
-```powershell
+### 4. Frontend Setup
+```bash
 cd frontend
 npm install
 ```
 
-### 5. n8n Workflow
-
+### 5. n8n Workflow Configuration
 1. Start n8n: `npx n8n`
-2. Open `http://localhost:5678`
-3. Import `n8n_workflow.json` (drag & drop onto the canvas)
-4. Set the workflow to **Active** (toggle in top-right)
+2. Open `http://localhost:5678` in your browser.
+3. Import the `n8n_workflow.json` file securely located in the project root.
+4. Ensure the webhook node is active and points to `http://localhost:8000/livekit/segment`.
 
 ---
 
-## Running Everything
+## 🏃 Running the System
 
-The easiest way is the unified startup script:
+Start all microservices instantly with the unified script:
 
-```powershell
+```bash
+# Make sure your venv is activated
 python start_all.py
 ```
+*This automatically launches the FastAPI backend, the React Vite frontend on port 5173, and the LiveKit Transcription Agent.*
 
-This automatically starts:
-1. ⚙️ FastAPI backend on `:8000`
-2. ⚛️ Vite frontend on `:5173`
-3. 🎙️ LiveKit Transcription Agent (in a separate window)
-
-> **Note:** Start n8n separately with `npx n8n` before running `start_all.py`.
-
-Then open [http://localhost:5173](http://localhost:5173) in your browser.
+Navigate to **http://localhost:5173** to access the UI.
 
 ---
 
-## Usage
+## 📈 Evaluation Metrics (Rubric Requirement A2)
 
-1. Click **"Enable Live Talk"**
-2. Select your microphone from the dropdown (e.g., "Realtek 2")
-3. Click **"Start Audio"** if prompted
-4. Speak — transcriptions appear as bubbles in real-time
+This system rigorously implements IR evaluation standards per the project requirements. 
+
+- Navigate to the **"Metrics Setup"** tab in the UI.
+- Click **"Run Full Evaluation"** to execute queries against the `sample_qrels.json` ground truth file.
+- The dashboard calculates **Precision@K**, **Recall@K**, **F1@K**, and **MAP** (Mean Average Precision) for $K \in \{1, 3, 5, 10\}$.
+- Results are heavily broken down by **Speaker Role** (Patient-only, Clinician-only, All) as required by the rubric.
+
+You can also navigate to the **"Compare Models"** tab to run ad-hoc searches and see side-by-side rankings from BM25, VSM, Boolean, and Hybrid models.
 
 ---
 
-## Project Structure
+## 📁 Repository Structure
 
-```
-CP423MedIR_n8n/
+```text
+CP423_Project/
 ├── project/
-│   ├── clinical_ir.py         # BM25 + vector IR pipeline
-│   ├── livekit_ingest.py      # FastAPI backend / API endpoints
-│   └── transcription_agent.py # LiveKit audio agent (Groq STT)
-├── frontend/
-│   └── src/
-│       └── components/
-│           ├── LiveRecording.jsx  # Live transcription UI
-│           └── ...
+│   ├── clinical_ir.py         # Core IR logic (BM25, VSM, Boolean, Hybrid), Evaluation logic
+│   ├── livekit_ingest.py      # FastAPI backend, evaluation & LiveKit endpoints
+│   ├── transcription_agent.py # LiveKit audio agent (Groq Whisper stream adapter)
+│   └── sample_qrels.json      # Ground truth relevance judgments (12 diverse queries)
+├── frontend/                  # React + Vite UI
+│   └── src/components/
+│       ├── EvaluationDashboard.jsx # Visualizes P@K, R@K, F1, MAP
+│       ├── ModelComparison.jsx     # Side-by-side search ranker 
+│       └── LiveRecording.jsx       # LiveKit Real-time UI
 ├── start_all.py               # Unified startup script
 ├── n8n_workflow.json          # n8n orchestration workflow
-├── requirements.txt
-└── .env.example               # Environment variable template
+├── requirements.txt           # Python dependencies
+└── .env.example               # Guided API setup template
 ```
 
 ---
-
-## Dependencies
-
-| Component | Technology |
-|----------|-----------|
-| Frontend | React, Vite, LiveKit Components |
-| Backend | FastAPI, uvicorn |
-| STT | Groq Whisper (whisper-large-v3-turbo) |
-| VAD | Silero (via livekit-plugins-silero) |
-| LiveKit | livekit-agents, livekit-rtc |
-| Orchestration | n8n |
-| IR | BM25, sentence-transformers |
-
----
-
-## Troubleshooting
-
-- **Blank browser page**: Check browser console. Make sure `.env` has correct `LIVEKIT_*` keys.
-- **No transcription**: Ensure the LiveKit agent window says `STT HIT` when you speak.
-- **n8n not receiving**: Make sure the workflow is set to **Active** (not Test Mode).
-- **Microphone not detected**: Browser needs microphone permission. The dropdown will show real device names after permission is granted.
+*Created for CP423 Information Retrieval & Search Engines*

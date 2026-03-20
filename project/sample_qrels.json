@@ -13,5 +13,97 @@
     "relevant_contents": [
       "Are you taking any medications right now?"
     ]
+  },
+  {
+    "query": "Did the patient describe any pain?",
+    "role_filter": "PATIENT",
+    "relevant_contents": [
+      "I've been having headaches for three days.",
+      "The pain is mostly behind my eyes.",
+      "It gets worse when I bend over."
+    ]
+  },
+  {
+    "query": "What history did the clinician ask about?",
+    "role_filter": "CLINICIAN",
+    "relevant_contents": [
+      "Do you have a history of migraines?",
+      "Has anyone in your family had similar symptoms?",
+      "Have you had any recent head injuries?"
+    ]
+  },
+  {
+    "query": "What lifestyle factors were discussed?",
+    "role_filter": "ALL",
+    "relevant_contents": [
+      "I haven't been sleeping well lately.",
+      "How much water do you drink daily?",
+      "I've been under a lot of stress at work.",
+      "Are you getting regular exercise?"
+    ]
+  },
+  {
+    "query": "What physical examination findings were noted?",
+    "role_filter": "CLINICIAN",
+    "relevant_contents": [
+      "Your blood pressure is slightly elevated.",
+      "I noticed some tenderness in the sinus area.",
+      "The neurological exam looks normal."
+    ]
+  },
+  {
+    "query": "What treatments or follow-ups were recommended?",
+    "role_filter": "CLINICIAN",
+    "relevant_contents": [
+      "I'd like to order a CT scan to rule out anything serious.",
+      "Let's start you on ibuprofen for the headaches.",
+      "We should schedule a follow-up in two weeks."
+    ]
+  },
+  {
+    "query": "When did the symptoms first appear?",
+    "role_filter": "PATIENT",
+    "relevant_contents": [
+      "I've been having headaches for three days.",
+      "The nausea started about two days ago.",
+      "I first noticed the pain on Monday morning."
+    ]
+  },
+  {
+    "query": "What allergies were discussed?",
+    "role_filter": "ALL",
+    "relevant_contents": [
+      "Do you have any known allergies?",
+      "I'm allergic to penicillin.",
+      "No food allergies that I know of."
+    ]
+  },
+  {
+    "query": "What diagnostic tests were discussed?",
+    "role_filter": "CLINICIAN",
+    "relevant_contents": [
+      "I'd like to order a CT scan to rule out anything serious.",
+      "We should run a basic blood panel.",
+      "Let me check your blood pressure."
+    ]
+  },
+  {
+    "query": "How did the patient describe the severity of symptoms?",
+    "role_filter": "PATIENT",
+    "relevant_contents": [
+      "The pain is about a seven out of ten.",
+      "It gets worse when I bend over.",
+      "Sometimes the nausea is so bad I can't eat."
+    ]
+  },
+  {
+    "query": "What was the overall clinical assessment?",
+    "role_filter": "ALL",
+    "relevant_contents": [
+      "Your blood pressure is slightly elevated.",
+      "The neurological exam looks normal.",
+      "Based on what you're describing, this could be tension headaches or sinusitis.",
+      "I'd like to order a CT scan to rule out anything serious."
+    ]
   }
 ]

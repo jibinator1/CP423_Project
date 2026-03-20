@@ -188,6 +188,7 @@ async def upload_mp3(
         
         full_transcript = runtime_bot.get_full_transcript()
         top_result = None
+        summary = "No transcript segments were produced."
         if full_transcript.strip():
             summary = runtime_bot.generate_clinical_summary(full_transcript)
             
@@ -206,6 +207,8 @@ async def upload_mp3(
             "transcript": full_transcript
         }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if os.path.exists(tmp_path):
@@ -325,6 +328,7 @@ def search_api(query: str, patient_name: str | None = None, top_k: int = 5, mode
 
 @app.get("/api/livekit/token")
 def get_livekit_token(participant_name: str = "Clinician", patient_name: str = ""):
+    """Generate a LiveKit access token for joining the clinical-room."""
     livekit_api_key = os.getenv("LIVEKIT_API_KEY")
     livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
     livekit_url = os.getenv("LIVEKIT_URL")
@@ -346,4 +350,44 @@ def get_livekit_token(participant_name: str = "Clinician", patient_name: str = "
         "token": token.to_jwt(),
         "url": livekit_url
     }
+
+
+# ---------------------------------------------------------------------------
+# Evaluation Endpoints — for the frontend Evaluation Dashboard
+# ---------------------------------------------------------------------------
+
+@app.get("/api/evaluate")
+def evaluate_api(model: str = "hybrid", top_k: int = 5):
+    """Run Precision@K, Recall@K, F1@K, and MAP evaluation for a single model.
+
+    Uses the sample_qrels.json file as the relevance judgment set.
+    Results include overall metrics, per-role breakdown, and per-query details.
+    """
+    runtime_bot = _get_bot()
+    qrels_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_qrels.json")
+    if not os.path.exists(qrels_path):
+        raise HTTPException(status_code=404, detail="sample_qrels.json not found.")
+    try:
+        result = runtime_bot.evaluate_retrieval(qrels_path, top_k=top_k, model_type=model)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/evaluate/compare")
+def evaluate_compare_api():
+    """Run comprehensive evaluation across all 4 IR models and K=1,3,5,10.
+
+    Returns a comparison table suitable for rendering charts and tables,
+    plus per-role breakdowns for each model at K=5.
+    """
+    runtime_bot = _get_bot()
+    qrels_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_qrels.json")
+    if not os.path.exists(qrels_path):
+        raise HTTPException(status_code=404, detail="sample_qrels.json not found.")
+    try:
+        result = runtime_bot.evaluate_all_models(qrels_path)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 

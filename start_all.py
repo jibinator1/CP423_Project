@@ -64,16 +64,7 @@ def start_services():
         if not backend_ready:
             print("WARNING: Backend did not respond to health check in time. Proceeding anyway...")
 
-        # 4. Start Frontend
-        print("Starting Frontend (Vite)...")
-        frontend_process = subprocess.Popen(
-            ["npm", "run", "dev"],
-            cwd=frontend_dir,
-            shell=True
-        )
-        processes.append(frontend_process)
-
-        # 5. Start LiveKit Transcription Agent
+        # 4. Start LiveKit Transcription Agent
         print("Starting LiveKit Transcription Agent in a NEW window...")
         agent_process = subprocess.Popen(
             [venv_python, "transcription_agent.py"],

@@ -221,7 +221,7 @@ async def run_agent():
         while True:
             await asyncio.sleep(1)
     finally:
-        await session_factory().close()
+        pass # Teardown happens automatically via contexts
 
 if __name__ == "__main__":
     try:
