@@ -462,7 +462,15 @@ class ClinicalIRSystem:
             bm25_scores = bm25.get_scores(query_text)
             scores = []
             for i, seg in enumerate(segments):
-                semantic_score = self._cosine_similarity(q_embedding, seg.get("embedding", []))
+                emb = seg.get("embedding", [])
+                if isinstance(emb, str):
+                    import json
+                    try:
+                        emb = json.loads(emb)
+                    except json.JSONDecodeError:
+                        emb = []
+                # Supabase REST often returns vectors as strings, causing len() mismatch
+                semantic_score = self._cosine_similarity(q_embedding, emb)
                 b_score = bm25_scores[i]
                 scores.append(semantic_score + (b_score * 0.1))
 

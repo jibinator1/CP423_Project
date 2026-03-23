@@ -65,11 +65,11 @@ def start_services():
             print("WARNING: Backend did not respond to health check in time. Proceeding anyway...")
 
         # 4. Start LiveKit Transcription Agent
-        print("Starting LiveKit Transcription Agent in a NEW window...")
+        print("Starting LiveKit Transcription Agent...")
         agent_process = subprocess.Popen(
             [venv_python, "transcription_agent.py"],
             cwd=project_dir,
-            creationflags=0x00000010
+            shell=True
         )
         processes.append(agent_process)
 
