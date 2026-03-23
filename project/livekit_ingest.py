@@ -72,6 +72,16 @@ def _get_bot() -> ClinicalIRSystem:
     return bot
 
 
+@app.on_event("startup")
+def clear_previous_session():
+    try:
+        runtime_bot = _get_bot()
+        runtime_bot.supabase.table("clinical_segments").delete().eq("session_id", "clinical-room").execute()
+        print("--- Cleared previous live session data (clinical-room) ---")
+    except Exception as e:
+        print(f"Failed to clear previous session data: {e}")
+
+
 @app.get("/health")
 def health(background_tasks: BackgroundTasks) -> dict[str, str]:
     """Health check endpoint that also triggers model warmup in the background."""
@@ -186,7 +196,8 @@ async def upload_mp3(
         roles = {"SPEAKER_00": "CLINICIAN", "SPEAKER_01": "PATIENT"}
         runtime_bot.process_audio_file(tmp_path, roles, patient_name)
         
-        full_transcript = runtime_bot.get_full_transcript()
+        session_id_used = os.path.basename(tmp_path)
+        full_transcript = runtime_bot.get_full_transcript(session_id=session_id_used)
         top_result = None
         summary = "No transcript segments were produced."
         if full_transcript.strip():
@@ -284,7 +295,7 @@ def get_livekit_summary(session_id: str = Form(...), patient_name: str = Form(""
         )
         top_result = results[0] if results else None
         
-        return {"summary": summary, "top_result": top_result, "corrected_transcript": corrected_transcript}
+        return {"summary": summary, "top_result": top_result, "transcript": corrected_transcript}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
