@@ -16,8 +16,16 @@ class BM25Retriever:
     """
 
     def __init__(self, k1=1.5, b=0.75):
+        # k1 (term frequency saturation): controls how quickly a term's contribution saturates.
+        # High k1 means higher term frequency has a larger impact on the score. 
+        # k1=1.5 is the standard choice for most text retrieval benchmarks (robust default).
         self.k1 = k1
+        
+        # b (length normalization): controls how much document length penalizes the score.
+        # b=1.0 is full normalization, b=0 is no normalization.
+        # b=0.75 is the standard balance that prevents long, repetitive documents from dominating.
         self.b = b
+        
         self.corpus: list[dict[str, Any]] = []
         self.doc_len: list[int] = []
         self.avgdl: float = 0.0
@@ -276,6 +284,8 @@ class ClinicalIRSystem:
 
         audio_payload = {"waveform": waveform, "sample_rate": samplerate}
 
+        # Step 2: Speaker Diarization (Who spoke when?)
+        # Identifies transitions and clusters vocal signatures to distinguish participants.
         print("Step 2: Identifying speakers (Diarization)...")
         if self.diarization_pipeline is None:
             raise RuntimeError("Diarization pipeline not initialized")
@@ -293,6 +303,8 @@ class ClinicalIRSystem:
         for turn, track, speaker in annotation.itertracks(yield_label=True):
             diar_segments.append({"start": turn.start, "end": turn.end, "speaker": speaker})
 
+        # Step 3: Speech-to-Text (Transcription) via Groq Cloud
+        # Whisper-large-v3 provides high accuracy for medical terminology and jargon.
         print("Step 3: Transcribing with Groq Whisper...")
         with open(audio_path, "rb") as file:
             transcription = self.groq_client.audio.transcriptions.create(
@@ -305,6 +317,9 @@ class ClinicalIRSystem:
         session_id = os.path.basename(audio_path)
         # Note: when uploading audio, you typically know the patient name upfront, 
         # but here we leave it blank for the generic processor unless passed in.
+        # Step 4: Speaker-to-Segment Alignment
+        # Whisper segments often cross speaker boundaries. We use the midpoint of each 
+        # text segment to find the most likely speaker in the diarization map.
         for w_seg in transcription.segments:
             midpoint = (w_seg["start"] + w_seg["end"]) / 2
             current_speaker = "UNKNOWN"
@@ -313,8 +328,11 @@ class ClinicalIRSystem:
                     current_speaker = d_seg["speaker"]
                     break
 
+            # Map generic speaker labels (e.g. SPEAKER_00) to roles (CLINICIAN/PATIENT)
             role = role_mapping.get(current_speaker, "PATIENT") # Default unknown to PATIENT
             text = w_seg["text"].strip()
+            
+            # Persist to Supabase with metadata for filtering
             self.index_segment(
                 content=text,
                 speaker_role=role,
@@ -469,7 +487,11 @@ class ClinicalIRSystem:
                         emb = json.loads(emb)
                     except json.JSONDecodeError:
                         emb = []
-                # Supabase REST often returns vectors as strings, causing len() mismatch
+                # HYBRID SCORING FORMULA:
+                # Semantic Score (0 to 1) + 0.1 * BM25 Score (variable)
+                # The 0.1 multiplier for BM25 provides a "keyword boost"—it ensures that
+                # segments with exact keyword matches pull ahead of others with similar 
+                # semantic meaning but different vocabulary.
                 semantic_score = self._cosine_similarity(q_embedding, emb)
                 b_score = bm25_scores[i]
                 scores.append(semantic_score + (b_score * 0.1))
@@ -524,6 +546,9 @@ class ClinicalIRSystem:
                 for seg in retrieved
             ]
         )
+        # PROMPT DESIGN:
+        # 1. We specify the LLM must ONLY use provided segments (prevents hallucination).
+        # 2. We require citation of speaker and timestamp to ensure clinical traceability.
         prompt = f"""
 Answer the question using ONLY the retrieved transcript segments below.
 If the answer is not present in the retrieved segments, you MUST say "Not enough evidence in retrieved segments."
@@ -575,6 +600,9 @@ Retrieved Segments:
         3. Recommended Follow-up Plan (proactive clinical suggestions)
         """
         print("\n--- Generating LLM summary ---")
+        # PROMPT STRUCTURE:
+        # We enforce a three-section format to ensure the summary is balanced between
+        # objective data (Patient Symptoms) and clinical intent (Observations/Plan).
         prompt = f"""
 Summarize the following clinical interview.
 Focus on patient concerns and clinician observations.
@@ -584,9 +612,9 @@ TRANSCRIPT:
 {transcript}
 
 SUMMARY FORMAT:
-1. Patient Reported Symptoms:
-2. Clinician Observations/Questions:
-3. Recommended Follow-up Plan:
+1. Patient Reported Symptoms: (What the patient explicitly said)
+2. Clinician Observations/Questions: (What the clinician probed for)
+3. Recommended Follow-up Plan: (Recommended next clinical steps)
 """
         completion = self.groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -638,10 +666,10 @@ SUMMARY FORMAT:
             )
             retrieved_contents = [r["content"] for r in retrieved]
             
-            # --- Semantic relevance matching ---
-            # Instead of exact string match, use cosine similarity of embeddings.
-            # A retrieved segment is "relevant" if it is semantically close
-            # (cosine_sim >= 0.5) to ANY of the ground-truth relevant contents.
+            # SEMANTIC RELEVANCE MATCHING
+            # A retrieved segment is considered "relevant" if its cosine similarity to 
+            # ANY ground-truth segment is >= 0.5. This threshold allows for paraphrasing 
+            # and synonymous clinical terms while filtering out unrelated noise.
             RELEVANCE_THRESHOLD = 0.5
             relevant_embeddings = self.embed_model.encode(list(relevant_contents))
             
